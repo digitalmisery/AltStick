@@ -207,7 +207,7 @@ static uchar    replyBuffer[4];
 uchar usbFunctionWrite(uchar *data, uchar len)
 {
 uchar   isLast;
-
+    ledRedOn();
     DBG1(0x31, (void *)&currentAddress.l, 4);
     if(len > bytesRemaining)
         len = bytesRemaining;
@@ -255,13 +255,14 @@ uchar   isLast;
         }
         DBG1(0x35, (void *)&currentAddress.l, 4);
     }
+    ledRedOff();
     return isLast;
 }
 
 uchar usbFunctionRead(uchar *data, uchar len)
 {
 uchar   i;
-
+    ledGreenOn();
     if(len > bytesRemaining)
         len = bytesRemaining;
     bytesRemaining -= len;
@@ -274,6 +275,7 @@ uchar   i;
         data++;
         CURRENT_ADDRESS++;
     }
+    ledGreenOff();
     return len;
 }
 
@@ -309,7 +311,9 @@ int __attribute__((noreturn)) main(void)
         uchar i = 0, j = 0;
         initForUsbConnectivity();
         for (;;){
+            ledBlueOn();
             usbPoll();
+            ledBlueOff();
 #if BOOTLOADER_CAN_EXIT
             if(requestBootLoaderExit){
                 if(--i == 0){
