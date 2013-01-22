@@ -59,10 +59,12 @@ these macros are defined, the boot loader usees them.
  * Default if not specified: 12 MHz
  */
 
-#define ledRedOn()    PORTD &= ~(1 << PD5)
-#define ledRedOff()   PORTD |= (1 << PD5)
-#define ledGreenOn()  PORTD &= ~(1 << PD6)
-#define ledGreenOff() PORTD |= (1 << PD6)
+#define ledRedOff()    PORTD &= ~(1 << PD5)
+#define ledRedOn()   PORTD |= (1 << PD5)
+#define ledGreenOff()  PORTD &= ~(1 << PD6)
+#define ledGreenOn() PORTD |= (1 << PD6)
+#define ledBlueOff()  PORTB &= ~(1 << PB1)
+#define ledBlueOn() PORTB |= (1 << PB1)
 
 
 /* ----------------------- Optional Hardware Config ------------------------ */
@@ -139,7 +141,7 @@ these macros are defined, the boot loader usees them.
 
 #ifndef __ASSEMBLER__   /* assembler cannot parse function definitions */
 
-#define JUMPER_BIT  0   /* jumper is connected to this bit in port D, active low */
+#define JUMPER_BIT  0   /* jumper is connected to this bit in port C, active low */
 
 #ifndef MCUCSR          /* compatibility between ATMega8 and ATMega88 */
 #   define MCUCSR   MCUSR
@@ -148,6 +150,8 @@ these macros are defined, the boot loader usees them.
 static inline void  bootLoaderInit(void)
 {
     PORTC |= (1 << JUMPER_BIT);     /* activate pull-up */
+    DDRD |= ((1 << PD5) | (1 << PD6)); /* set LED ports to output */
+    DDRB |= (1 << PB1);
     if(!(MCUCSR & (1 << EXTRF)))    /* If this was not an external reset, ignore */
         leaveBootloader();
     MCUCSR = 0;                     /* clear all reset flags for next time */
@@ -155,6 +159,10 @@ static inline void  bootLoaderInit(void)
 
 static inline void  bootLoaderExit(void)
 {
+    ledBlueOff();
+    DDRD &= ~(1 << PD5);
+    DDRD &= ~(1 << PD6);
+    DDRB &= ~(1 << PB1);
     PORTC = 0;                      /* undo bootLoaderInit() changes */
 }
 
