@@ -89,6 +89,8 @@ static uchar            requestBootLoaderExit;
 static longConverter_t  currentAddress; /* in bytes */
 static uchar            bytesRemaining;
 static uchar            isLastPage;
+static uint				blue_LED_on = 0;
+static uint				red_LED_on = 0;
 #if HAVE_EEPROM_PAGED_ACCESS
 static uchar            currentRequest;
 #else
@@ -207,7 +209,17 @@ static uchar    replyBuffer[4];
 uchar usbFunctionWrite(uchar *data, uchar len)
 {
 uchar   isLast;
-    ledRedOn();
+    BlueLEDOff();
+    if (red_LED_on)
+	{
+		RedLEDOff();
+		red_LED_on = 0;
+	}
+    else
+	{
+		RedLEDOn();
+		red_LED_on = 1;
+	}
     DBG1(0x31, (void *)&currentAddress.l, 4);
     if(len > bytesRemaining)
         len = bytesRemaining;
@@ -255,14 +267,23 @@ uchar   isLast;
         }
         DBG1(0x35, (void *)&currentAddress.l, 4);
     }
-    ledRedOff();
     return isLast;
 }
 
 uchar usbFunctionRead(uchar *data, uchar len)
 {
 uchar   i;
-    ledGreenOn();
+    RedLEDOff();
+    if (blue_LED_on)
+	{
+		BlueLEDOff();
+		blue_LED_on = 0;
+	}
+    else
+	{
+		BlueLEDOn();
+		blue_LED_on = 1;
+	}
     if(len > bytesRemaining)
         len = bytesRemaining;
     bytesRemaining -= len;
@@ -275,7 +296,6 @@ uchar   i;
         data++;
         CURRENT_ADDRESS++;
     }
-    ledGreenOff();
     return len;
 }
 
@@ -310,10 +330,9 @@ int __attribute__((noreturn)) main(void)
     if(bootLoaderCondition()){
         uchar i = 0, j = 0;
         initForUsbConnectivity();
+		GreenLEDOn();
         for (;;){
-            ledBlueOn();
             usbPoll();
-            ledBlueOff();
 #if BOOTLOADER_CAN_EXIT
             if(requestBootLoaderExit){
                 if(--i == 0){

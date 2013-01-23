@@ -59,12 +59,12 @@ these macros are defined, the boot loader usees them.
  * Default if not specified: 12 MHz
  */
 
-#define ledRedOff()    PORTD &= ~(1 << PD5)
-#define ledRedOn()   PORTD |= (1 << PD5)
-#define ledGreenOff()  PORTD &= ~(1 << PD6)
-#define ledGreenOn() PORTD |= (1 << PD6)
-#define ledBlueOff()  PORTB &= ~(1 << PB1)
-#define ledBlueOn() PORTB |= (1 << PB1)
+#define RedLEDOff()    PORTD &= ~(1 << PD5)
+#define RedLEDOn()   PORTD |= (1 << PD5)
+#define GreenLEDOff()  PORTD &= ~(1 << PD6)
+#define GreenLEDOn() PORTD |= (1 << PD6)
+#define BlueLEDOff()  PORTB &= ~(1 << PB1)
+#define BlueLEDOn() PORTB |= (1 << PB1)
 
 
 /* ----------------------- Optional Hardware Config ------------------------ */
@@ -159,7 +159,7 @@ static inline void  bootLoaderInit(void)
 
 static inline void  bootLoaderExit(void)
 {
-    ledBlueOff();
+    GreenLEDOff();
     DDRD &= ~(1 << PD5);
     DDRD &= ~(1 << PD6);
     DDRB &= ~(1 << PB1);
