@@ -1,7 +1,7 @@
 AltStick
 ========
 
-![AltStick](/digitalmisery/AltStick/blob/master/AltStick.jpeg?raw=true "AltStick Assembled")
+![Screenshot](https://raw.github.com/digitalmisery/AltStick/master/AltStick.jpeg)
 
 Design files (open-source software and hardware) for the Miniature Rocket Altimeter (AltStick) Project.  
 
