@@ -1,5 +1,7 @@
+#include <EEPROM.h>
 #include <avr/sleep.h>
 #include <avr/wdt.h>
+#include <avr/power.h>
 #include <PinChangeInt.h>
 #include <Wire.h>
 #include "UsbKeyboard.h"
@@ -25,7 +27,21 @@
 #define ALT_INT2 1
 #define ACC_INT1 16
 #define ACC_INT2 17
-int i = 0;
+
+// Watch Dog Timer Periods
+// 0=16ms, 1=32ms,2=64ms,3=128ms,4=250ms,5=500ms
+// 6=1 sec,7=2 sec, 8=4 sec, 9= 8sec
+#define WDT_16ms 0
+#define WDT_32ms 1
+#define WDT_64ms 2
+#define WDT_128ms 3
+#define WDT_250ms 4
+#define WDT_500ms 5
+#define WDT_1s 6
+#define WDT_2s 7
+#define WDT_4s 8
+#define WDT_8s 9
+
 int updateCount = 75;
 volatile boolean f_wdt = 1;
 volatile byte state = 0;
@@ -51,33 +67,86 @@ uint8_t MPL3115A2_afrac = 0;
 uint16_t MPL3115A2_amax = 0;
 uint8_t MPL3115A2_amaxfrac = 0;
 unsigned int MPL3115A2_height_feet = 0;
-uint16_t LIS331HH_X_val = 0;
-byte LIS331HH_X_high = 0;
+byte LIS331HH_X_val = 0;
+byte LIS331HH_Y_val = 0;
+byte LIS331HH_Z_val = 0;
 byte LIS331HH_X_low = 0;
+byte LIS331HH_Y_low = 0;
+byte LIS331HH_Z_low = 0;
+uint8_t LIS331HH_max = 0;
 boolean MPL3115A2_Ready = 0;
 boolean launchDetected = false;
+boolean buttonHold = false;
+long elapsedTime = 0;
+
+// EEPROM STUFF
+#define EEPROM_START_ADDRESS_1 0
+#define EEPROM_END_ADDRESS_1 750
+#define EEPROM_START_ADDRESS_1 751
+#define EEPROM_END_ADDRESS_2 1000
+#define EEPROM_MAX_ALT_ADDRESS 1001
+#define EEPROM_MAX_ACC_ADDRESS 1003
+#define EEPROM_MAX_VEL_ADDRESS 1004
+int eeprom_address = 0;
+
+// Structure for 3 bytes stored in EEPROM at every sample point
+typedef struct {
+  unsigned int altitude;
+  byte acceleration;
+} LOG_DATA;
+
+LOG_DATA logData;
+
+void prepare_log_data() {
+  logData.altitude = MPL3115A2_height_feet;
+  logData.acceleration = LIS331HH_max;  
+}
+
+void log_to_EEPROM() {
+  EEPROM.write(EEPROM_MAX_ALT_ADDRESS, logData.altitude >> 8);
+  EEPROM.write(EEPROM_MAX_ALT_ADDRESS+1, logData.altitude);
+  EEPROM.write(EEPROM_MAX_ACC_ADDRESS, logData.acceleration);
+}
+
+void read_from_EEPROM(int start_address) {
+  logData.altitude = EEPROM.read(start_address);
+  logData.altitude = logData.altitude << 8;
+  logData.altitude = logData.altitude | EEPROM.read(start_address+1);
+  logData.acceleration = EEPROM.read(start_address+2);
+}
  
 void setup(){
   cbi(ADCSRA,ADEN);                    // switch Analog to Digital converter OFF
   cbi(PRR,PRTIM1);
   cbi(PRR,PRTIM0);
-  //cbi(PRR,PRUSI);
   cbi(PRR,PRADC);
   
+  power_adc_disable();
+  power_spi_disable();
+  power_usart0_disable();
+  
+  /* Not used - here for reference
+  power_timer0_enable();
+  power_timer0_disable();
+  power_timer1_enable();
+  power_timer1_disable();
+  power_timer2_enable();
+  power_timer2_disable();
+  */
   pinMode(USB_D_PLUS, INPUT); 
   digitalWrite(USB_D_PLUS, HIGH); // Turn on pull-up
   pinMode(USB_D_MINUS, INPUT); 
   pinMode(REDLED,INPUT);
   pinMode(GREENLED,INPUT);
   pinMode(BLUELED,INPUT);
-  pinMode(BUTTON, INPUT);
   pinMode(ALT_INT1, INPUT);
-  digitalWrite(ALT_INT1, HIGH);
+  //digitalWrite(ALT_INT1, HIGH);
   pinMode(ALT_INT2, INPUT);
-  digitalWrite(ALT_INT2, HIGH);
+  //digitalWrite(ALT_INT2, HIGH);
   pinMode(ACC_INT1, INPUT);
   pinMode(ACC_INT2, INPUT);
-  digitalWrite(BUTTON, HIGH);
+  pinMode(BUTTON, INPUT);
+  digitalWrite(BUTTON, HIGH); // Turn on pull-up
   PCintPort::attachInterrupt(BUTTON, &state_change, FALLING);
   PCintPort::attachInterrupt(ACC_INT1, &high_acc, RISING);
   PCintPort::attachInterrupt(ACC_INT2, &low_acc, RISING);
@@ -94,20 +163,38 @@ void loop(){
   switch (state) {
     case 0: // Reset Low-Power State
       wdt_disable();
-      Enable_LEDs(0);
+      power_twi_enable();
       Sleep_LIS331HH();
       Sleep_MPL3115A2();
+      power_twi_disable();
+      pinMode(USB_D_PLUS, INPUT);
+      pinMode(USB_D_MINUS, INPUT); 
       digitalWrite(USB_D_PLUS, HIGH);
-      EIMSK |= _BV(INT0);  
+      EIMSK |= _BV(INT0);
+      read_from_EEPROM(EEPROM_MAX_ALT_ADDRESS);
+      //PCintPort::attachInterrupt(BUTTON, &state_change, FALLING);  
       sei(); // Enable interrups
+      Red_LED_On(1);
+      delay(10);
+      Red_LED_On(0);
+      Green_LED_On(1);
+      delay(10);
+      Green_LED_On(0);
+      Blue_LED_On(1);
+      delay(10);
+      Blue_LED_On(0);
+      Enable_LEDs(0);
       system_sleep(); // Go to sleep
       break;
     case 1: //Average 16 samples for zeroed value
-      delay(1000);     
+      power_twi_enable();
+      delay_sleep(WDT_1s);
+      //delay(1000);    
       Red_LED_On(1);
       Average_Alt_Data_MPL3115A2(16);
       MPL3115A2_zeroed_aval = MPL3115A2_aavg;
       Clear_Max_Alt_MPL3115A2();
+      Reset_Max_Acc_LIS311HH();
       Red_LED_On(0);
       Activate_Lauch_Detection_LIS331HH();
       system_sleep();
@@ -116,12 +203,14 @@ void loop(){
       if (launchDetected){
         Deactivate_Lauch_Detection_LIS331HH();
         launchDetected = false;
+        Activate_ZeroG_Detection_LIS331HH();
       }
       if (f_wdt==1) {  // wait for timed out watchdog / flag is set when a watchdog timeout occurs
         f_wdt=0;
-        Activate_ZeroG_Detection_LIS331HH();
         Green_LED_On(1);
         Measure_Alt_MPL3115A2();
+        Read_Acc_Data_LIS331HH();
+        Get_Max_Acc_LIS331HH();
         Green_LED_On(0);
         system_sleep();
       }
@@ -133,20 +222,33 @@ void loop(){
     //tone(10, 4000);
     Red_LED_On(1);
     Read_Max_Alt_MPL3115A2();
+    power_twi_disable();
     if (MPL3115A2_amax-1 > MPL3115A2_zeroed_aval)
       MPL3115A2_height_feet = (int)floor((((MPL3115A2_amax-1)+MPL3115A2_amaxfrac*0.0625)-MPL3115A2_zeroed_aval)*3.281);
     else MPL3115A2_height_feet = 0;
+    prepare_log_data();
+    log_to_EEPROM();
+    //logData.altitude = 0;
+    //logData.acceleration = 0;
     Red_LED_On(0);
+    delay(5);
     //delay(250);
     //noTone(10);
+    state = 0;
     system_sleep();
     break;
     case 4:
+    elapsedTime = millis();
+    while (digitalRead(BUTTON) == LOW) {}
+    elapsedTime = millis() - elapsedTime;
+    if (elapsedTime > 1000)
+        state = 1;
+    else  
     if (f_wdt==1) {  // wait for timed out watchdog / flag is set when a watchdog timeout occurs
       //f_wdt=0;
-      if (MPL3115A2_height_feet/100 > 0) {
+      if (logData.altitude/100 > 0) {
         pinMode(REDLED, OUTPUT);
-        for (int i=0; i < MPL3115A2_height_feet/100; i++) {
+        for (int i=0; i < logData.altitude/100; i++) {
           digitalWrite(REDLED,HIGH);  // let led blink
           delay(100);
           digitalWrite(REDLED,LOW);
@@ -155,7 +257,7 @@ void loop(){
         Red_LED_On(0);
         delay(500);
         pinMode(GREENLED, OUTPUT);
-        for (int i=0; i < (MPL3115A2_height_feet/10)%10; i++) {
+        for (int i=0; i < (logData.altitude/10)%10; i++) {
           digitalWrite(GREENLED,HIGH);  // let led blink
           delay(100);
           digitalWrite(GREENLED,LOW);
@@ -164,7 +266,7 @@ void loop(){
         Green_LED_On(0);
         delay(500);
         pinMode(BLUELED, OUTPUT);
-        for (int i=0; i < (MPL3115A2_height_feet%100)%10; i++) {
+        for (int i=0; i < (logData.altitude%100)%10; i++) {
           digitalWrite(BLUELED,HIGH);  // let led blink
           delay(100);
           digitalWrite(BLUELED,LOW);
@@ -173,9 +275,9 @@ void loop(){
         Blue_LED_On(0);
       }
       else
-      if (MPL3115A2_height_feet/10 > 0) {
+      if (logData.altitude/10 > 0) {
         pinMode(GREENLED, OUTPUT);
-        for (int i=0; i < (MPL3115A2_height_feet/10); i++) {
+        for (int i=0; i < (logData.altitude/10); i++) {
           digitalWrite(GREENLED,HIGH);  // let led blink
           delay(100);
           digitalWrite(GREENLED,LOW);
@@ -184,7 +286,7 @@ void loop(){
         Green_LED_On(0);
         delay(500);
         pinMode(BLUELED, OUTPUT);
-        for (int i=0; i < (MPL3115A2_height_feet)%10; i++) {
+        for (int i=0; i < (logData.altitude)%10; i++) {
           digitalWrite(BLUELED,HIGH);  // let led blink
           delay(100);
           digitalWrite(BLUELED,LOW);
@@ -193,23 +295,23 @@ void loop(){
         Blue_LED_On(0);
       }
       else
-      if (MPL3115A2_height_feet > 0) {
+      if (logData.altitude > 0) {
         pinMode(BLUELED,OUTPUT);
-        for (int i=0; i < MPL3115A2_height_feet; i++) {
+        for (int i=0; i < logData.altitude; i++) {
           digitalWrite(BLUELED,HIGH);  // let led blink
           delay(100);
           digitalWrite(BLUELED,LOW);
           delay(250);
         }
         Blue_LED_On(0);
-      }      
+      }
       system_sleep();     
     }
     break;
     case 7:
     if (!USB_init){
       EIMSK &= (~_BV(INT0));
-      digitalWrite(2, LOW);
+      digitalWrite(USB_D_PLUS, LOW);
       UsbKeyboard.initializeKeyboard();
       delay(10);
       UsbKeyboard.reconnectKeyboard();
@@ -231,25 +333,14 @@ void loop(){
     if (keyboardOutput == 1){  
       UsbKeyboard.typeCharacters("Height:");
       UsbKeyboard.sendKeyStroke(KEY_SPACE);
-//      UsbKeyboard.typeCharacters("M ");
-//      UsbKeyboard.typeNumber((MPL3115A2_max_aval - MPL3115A2_aval));
-//      UsbKeyboard.sendKeyStroke(KEY_SPACE);
-//      UsbKeyboard.typeNumber((MPL3115A2_max_afrac - MPL3115A2_afrac));
-//      UsbKeyboard.sendKeyStroke(KEY_SPACE);
-//      if ((((MPL3115A2_max_aval+MPL3115A2_max_afrac*0.0625)-MPL3115A2_zeroed_aval)*3.281) >=0)
-//        UsbKeyboard.typeNumber((int)floor((((MPL3115A2_max_aval+MPL3115A2_max_afrac*0.0625)-MPL3115A2_zeroed_aval)*3.281)));
-//        else UsbKeyboard.typeNumber(0);
-      UsbKeyboard.typeNumber(MPL3115A2_height_feet);
-      UsbKeyboard.typeCharacters("F");
+      read_from_EEPROM(EEPROM_MAX_ALT_ADDRESS);
+      UsbKeyboard.typeNumber(logData.altitude);
+      UsbKeyboard.typeCharacters("f");
       UsbKeyboard.sendKeyStroke(KEY_SPACE);
-      UsbKeyboard.typeCharacters("Zeroed: ");
-//      UsbKeyboard.typeNumber((int)MPL3115A2_zeroed_aval);
-      UsbKeyboard.typeFloat(MPL3115A2_zeroed_aval*3.281);
+      UsbKeyboard.typeCharacters("Max Acc");
       UsbKeyboard.sendKeyStroke(KEY_SPACE);
-      UsbKeyboard.typeCharacters("Max: ");
-//      UsbKeyboard.typeNumber((int)(MPL3115A2_max_aval+MPL3115A2_max_afrac*0.0625));
-      //UsbKeyboard.typeFloat((MPL3115A2_aavg)*3.281);
-      UsbKeyboard.typeFloat((MPL3115A2_amax-1+MPL3115A2_amaxfrac*0.0625)*3.281);
+      UsbKeyboard.typeFloat((logData.acceleration/128.0)*24);
+      UsbKeyboard.typeCharacters("g");
       UsbKeyboard.sendKeyStroke(KEY_ENTER);
       keyboardOutput = 0;
     }
@@ -261,12 +352,18 @@ void loop(){
 // system wakes up when wtchdog is timed out
 void system_sleep() {
   set_sleep_mode(SLEEP_MODE_PWR_DOWN); // sleep mode is set here
+  //cli();
   sleep_enable();
-
-  sleep_mode();                        // System sleeps here
-
-  sleep_disable();                     // System continues execution here when watchdog timed out 
-  if (digitalRead(2) == LOW) {
+  //sleep_bod_disable();
+  //sei();
+  // turn off brown-out enable in software
+  MCUCR = _BV (BODS) | _BV (BODSE);  // turn on brown-out enable select
+  MCUCR = _BV (BODS);        // this must be done within 4 clock cycles of above
+  sleep_mode();
+  //sleep_cpu();              // sleep within 3 clock cycles of above 			\
+  sleep_disable();                     // System continues execution here when watchdog timed out
+  //sei(); 
+  if (digitalRead(USB_D_PLUS) == LOW) {
       USB_conn = 1;
       if (USB_init) {}
       else USB_init = 0;
@@ -274,13 +371,27 @@ void system_sleep() {
     USB_conn = 0;
     USB_init = 0;
   }
-  //sbi(ADCSRA,ADEN);                    // switch Analog to Digitalconverter ON
+}
+
+// sleep for one watchdog timer period
+void delay_sleep(int timeout){
+  setup_watchdog(timeout);
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN); // sleep mode is set here
+  cli();
+  sleep_enable();
+  //sleep_bod_disable();
+  sei();
+  MCUCR = _BV (BODS) | _BV (BODSE);  // turn on brown-out enable select
+  MCUCR = _BV (BODS);        // this must be done within 4 clock cycles of above
+  sleep_cpu();              // sleep within 3 clock cycles of above
+  sleep_disable();                     // System continues execution here when watchdog timed out
+  wdt_disable(); 
+  sei();
 }
 
 // 0=16ms, 1=32ms,2=64ms,3=128ms,4=250ms,5=500ms
 // 6=1 sec,7=2 sec, 8=4 sec, 9= 8sec
 void setup_watchdog(int ii) {
-
   byte bb;
   int ww;
   if (ii > 9 ) ii=9;
@@ -288,7 +399,6 @@ void setup_watchdog(int ii) {
   if (ii > 7) bb|= (1<<5);
   bb|= (1<<WDCE);
   ww=bb;
-
   MCUSR &= ~(1<<WDRF);
   // start timed sequence
   WDTCSR |= (1<<WDCE) | (1<<WDE);
@@ -305,25 +415,30 @@ ISR(WDT_vect) {
 void state_change () {
   switch (state) {
     case 0:  //standby
-      state = 1;
+      state = 4;
       wdt_disable();
+      f_wdt=1;
       break;
     case 1: //zero height
       state = 2;
-      setup_watchdog(3);
+      setup_watchdog(WDT_128ms);
       break;
     case 2: //acquire height
       state = 3;
       wdt_disable();
       break;
     case 3: //stop aquiring height
-      state = 4;
       f_wdt=1;
+      state = 4;
       wdt_disable();
-      //setup_watchdog(9);
       break;
     case 4: //flash out height
       //state = 0;
+      //if (buttonHold){
+      //  state = 1;
+      //  buttonHold = false;
+      //}
+      f_wdt=1;
       //wdt_disable();
       break;
     case 7:
@@ -337,7 +452,7 @@ void high_acc () {
       break;
     case 1: //zero height
       state = 2;
-      setup_watchdog(3);
+      setup_watchdog(WDT_128ms);
       launchDetected = true;
       break;
     case 2: //acquire height
@@ -435,19 +550,14 @@ void Initialize_MPL3115A2() {
   
   Wire.beginTransmission(MPL3115A2_ADDRESS);
   Wire.write(0x28); //CTRL_REG3 - Interrupts control
-  Wire.write(0x11); //Active low and open drain
+  Wire.write(0x22); //Active high and push-pull
   Wire.endTransmission();
   
   Wire.beginTransmission(MPL3115A2_ADDRESS);
   Wire.write(0x29); //CTRL_REG4 - Interrupts enabled
   Wire.write(0x80); //Data Ready and Pressure Change interrupts
   Wire.endTransmission();
-  /*
-  Wire.beginTransmission(MPL3115A2_ADDRESS);
-  Wire.write(0x2A); //CTRL_REG5 - Interrupt config
-  Wire.write(0x80); //INT1 = Data Ready, INT2 = Pressure Change
-  Wire.endTransmission();
-  */
+  
   Clear_Max_Alt_MPL3115A2();
 }
 
@@ -459,15 +569,9 @@ void Sleep_MPL3115A2() {
 }
 
 void Measure_Alt_MPL3115A2 () {
-  //Wire.beginTransmission(MPL3115A2_ADDRESS);
-  //Wire.write(0x26); //CTRL_REG1
-  //Wire.endTransmission(false);
-  //Wire.requestFrom(MPL3115A2_ADDRESS, 1);
-  //Wire.read();
-  //Wire.endTransmission();
   Wire.beginTransmission(MPL3115A2_ADDRESS);
   Wire.write(0x26); //CTRL_REG1
-  Wire.write(0b10100010); //Alt, 32x OS, One-Shot, Standby
+  Wire.write(0b10100010); //Alt, 16x OS, One-Shot, Standby
   Wire.endTransmission();
 }
 
@@ -615,4 +719,57 @@ void Activate_ZeroG_Detection_LIS331HH() {
   Wire.write(0x37); //INT2_DURATION
   Wire.write(0b00000001); //Interrupt 2 Duration
   Wire.endTransmission();
+}
+
+// Read out acceleration data
+void Read_Acc_Data_LIS331HH() {
+  for (int i=0x28; i < 0x2E; i++) {
+    Wire.beginTransmission(LIS331HH_ADDRESS);
+    Wire.write(i);
+    Wire.endTransmission();
+    Wire.requestFrom(LIS331HH_ADDRESS, 1);    // request 1 byte from slave device
+    while(Wire.available()){    // slave may send less than requested
+      switch (i) {
+        case 0x28: 
+          LIS331HH_X_low = Wire.read(); // X LSBs
+          break;
+        case 0x29:
+          LIS331HH_X_val = Wire.read(); // X MSBs
+          break;
+        case 0x2A:
+          LIS331HH_Y_low = Wire.read(); // Y LSBs
+          break;
+        case 0x2B:
+          LIS331HH_Y_val = Wire.read(); // Y MSBs
+          break;
+        case 0x2C:
+          LIS331HH_Z_low = Wire.read(); // Z LSBs
+          break;
+        case 0x2D:
+          LIS331HH_Z_val = Wire.read(); // Z MSBs
+          break;
+      }
+    }
+  }
+}
+
+void Reset_Max_Acc_LIS311HH() {
+  LIS331HH_max = 0;
+}
+
+void Get_Max_Acc_LIS331HH() {
+  // Compute absolute values
+  if (LIS331HH_X_val > 127)
+    LIS331HH_X_val = 256-LIS331HH_X_val;
+  if (LIS331HH_Y_val > 127)
+    LIS331HH_Y_val = 256-LIS331HH_Y_val;
+  if (LIS331HH_Z_val > 127)
+    LIS331HH_Z_val = 256-LIS331HH_Z_val;
+  // Determine which axis is max
+  if (LIS331HH_max < LIS331HH_X_val)
+    LIS331HH_max = LIS331HH_X_val;
+  if (LIS331HH_max < LIS331HH_Y_val)
+    LIS331HH_max = LIS331HH_Y_val;
+  if (LIS331HH_max < LIS331HH_Z_val)
+    LIS331HH_max = LIS331HH_Z_val;
 }
