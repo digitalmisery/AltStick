@@ -245,7 +245,7 @@ section at the end of this file).
  * obdev's free shared VID/PID pair. See the file USB-IDs-for-free.txt for
  * details.
  */
-#define USB_CFG_DEVICE_NAME     'A','l','T','S','t','i','c','k'
+#define USB_CFG_DEVICE_NAME     'A','L','T','S','T','I','C','K'
 #define USB_CFG_DEVICE_NAME_LEN 8
 /* Same as above for the device name. If you don't want a device name, undefine
  * the macros. See the file USB-IDs-for-free.txt before you assign a name if
@@ -267,7 +267,7 @@ section at the end of this file).
  */
 #define USB_CFG_INTERFACE_CLASS     0x03  /* HID */ /* define class here if not at device level */
 #define USB_CFG_INTERFACE_SUBCLASS  0
-#define USB_CFG_INTERFACE_PROTOCOL  0
+#define USB_CFG_INTERFACE_PROTOCOL  1
 /* See USB specification if you want to conform to an existing device class or
  * protocol. The following classes must be set at interface level:
  * HID class is 3, no subclass and protocol required (but may be useful!)
